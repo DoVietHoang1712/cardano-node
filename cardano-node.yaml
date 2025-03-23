@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-node
+  labels:
+    app: cardano-node
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-node
+  template:
+    metadata:
+      labels:
+        app: cardano-node
+    spec:
+      initContainers:
+        - name: mithril-client
+          image: ubuntu:22.04
+          env:
+            - name: NETWORK
+              value: preprod
+            - name: DISTRIBUTION
+              value: latest
+            - name: GENESIS_VERIFICATION_KEY
+              value: "5b3132372c37332c3132342c3136312c362c3133372c3133312c3231332c3230372c3131372c3139382c38352c3137362c3139392c3136322c3234312c36382c3132332c3131392c3134352c31332c3233322c3234332c34392c3232392c322c3234392c3230352c3230352c33392c3233352c34345d"
+            - name: AGGREGATOR_ENDPOINT
+              value: https://aggregator.release-preprod.api.mithril.network/aggregator
+            - name: SNAPSHOT_DIGEST
+              value: "latest"
+          command:
+            - "bash"
+            - "-c"
+            -  " set -x && apt-get update && apt-get install -y curl jq 
+              && curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/input-output-hk/mithril/refs/heads/main/mithril-install.sh | sh -s -- -c mithril-client -d $(DISTRIBUTION) -p /usr/local/bin
+              && cd /home && mkdir -p mithril && cd mithril
+              && mithril-client cardano-db download latest
+              && cp -r /home/mithril/db /home/db"
+          volumeMounts:
+            - name: mithril-snapshot
+              mountPath: /home/db
+      containers:
+        - name: cardano-node
+          image: ghcr.io/intersectmbo/cardano-node:10.1.4
+          env:
+            - name: NETWORK
+              value: preprod
+          command:
+            - "bash"
+            - "-c"
+            - "cardano-node run --topology /config/topology.json --database-path /home/db/db --socket-path /node-ipc/node.socket --port 3001 --config /config/config.json"
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 4096Mi
+            limits:
+              cpu: 1000m
+              memory: 4096Mi
+          volumeMounts:
+            - name: mithril-snapshot
+              mountPath: /home/db
+            - name: cardano-config
+              mountPath: /config
+            - name: cardano-ipc
+              mountPath: /node-ipc
+      tolerations:
+        - key: app
+          operator: Equal
+          value: pipeline
+      volumes:
+        - name: mithril-snapshot
+          persistentVolumeClaim:
+            claimName: mithril-snapshot
+        - name: cardano-config
+          configMap:
+            name: cardano-config
+        - name: cardano-ipc
+          persistentVolumeClaim:
+            claimName: cardano-ipc
